@@ -115,23 +115,15 @@ jobs:
 
       - name: Debug | Show Metadata Outputs
         env:
-          tag_0: "${{ steps.meta.outputs.tags[0] }}"
-          tag_1: "${{ steps.meta.outputs.tags[1] }}"
-          tag_2: "${{ steps.meta.outputs.tags[2] }}"
-          tag_3: "${{ steps.meta.outputs.tags[3] }}"
-          full_output: ${{ steps.meta.outputs }}
+          full_output: ${{ steps.meta.outputs.tags }}
         run: |
-          echo "tag_0: $tag_0"
-          echo "tag_1: $tag_1"
-          echo "tag_2: $tag_2"
-          echo "tag_3: $tag_3"
-          echo ""
           echo "looping through all tags now"
           TAGS=(${{ steps.meta.outputs.tags }})
           for value in "${TAGS[@]}"
           do
             echo "current tag is: $value"
           done
+          echo ""
           echo "full_output: $full_output"
 
       # TODO: as soon as we can introduce the source ref for merge requests here, we should add it. As of now, Merge Requests pointing to master always have their prefix set to main. Yet we want it to be set after the MR source branch name. E.g. feat/xyz
