@@ -83,25 +83,6 @@ jobs:
             type=sha,format=long,prefix={{branch}}{{base_ref}}{{tag}}-,suffix=-{{date 'YYYYMMDD-HHmmss' tz='UTC'}}
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
 
-      - name: Debug | Show Metadata Outputs
-        env:
-          full_output: ${{ steps.meta.outputs.tags }}
-        run: |
-          TAGS=(${{ steps.meta.outputs.tags }})
-          echo "Calling Tags directly"
-          echo "tag_0: ${TAGS[0]}"
-          echo "tag_1: ${TAGS[1]}"
-          echo "tag_2: ${TAGS[2]}"
-          echo "tag_3: ${TAGS[3]}"
-          echo ""
-          echo "looping through all tags now"
-          for value in "${TAGS[@]}"
-          do
-            echo "current tag is: $value"
-          done
-          echo ""
-          echo "full_output: $full_output"
-
       - name: Download the Mint ISO File
         run:  curl -sfL "$MINT_ISO_URL_BASE$MINT_ISO_CINNAMON_FILENAME" -o "$MINT_ISO_CINNAMON_FILENAME"
 
@@ -125,11 +106,8 @@ jobs:
         env:
           local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local"
         run: |
-          echo "Importing data from $(pwd)/unsquashfs into a new docker iamge called $local_image"
+          echo "Importing data from $(pwd)/unsquashfs into a new docker image called $local_image"
           sudo tar -C unsquashfs -c . | docker import - "$local_image"
-
-      - name: Debug | Show a list of docker images that are present on the host
-        run: docker images --all
 
       # TODO: as soon as we can introduce the source ref for merge requests here, we should add it. As of now, Merge Requests pointing to master always have their prefix set to main. Yet we want it to be set after the MR source branch name. E.g. feat/xyz
 
@@ -147,9 +125,6 @@ jobs:
             docker tag "$local_image" ${value}
             docker push ${value}
           done
-
-      - name: Debug | Once again show a list of docker images that are present on the host
-        run: docker images --all
 
       - name: Get Digest for the new image
         id: digest
