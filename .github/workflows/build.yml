@@ -122,37 +122,6 @@ jobs:
           sudo unsquashfs -f -d unsquashfs/ $fs
 
       - name: Tar the ISO file system into a tagged docker image on the local docker cache
-        shell: bash
-        env:
-          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local"
-        run: |
-          echo "Importing data from $(pwd)/unsquashfs into a new docker iamge called $local_image"
-          sudo tar -C unsquashfs -c . | docker import - "$local_image"
-
-      - name: Debug | Show a list of docker images that are present on the host
-        run: docker images --all
-
-      - name: Download the Mint ISO File
-        run:  curl -sfL "$MINT_ISO_URL_BASE$MINT_ISO_CINNAMON_FILENAME" -o "$MINT_ISO_CINNAMON_FILENAME"
-
-      - name: Download the Mint SHA256sum.txt file
-        run: curl -sfL "$MINT_ISO_URL_BASE$MINT_ISO_SHA_FILENAME" -o "$MINT_ISO_SHA_FILENAME"
-
-      - name: Verify the Mint ISO File hashsum
-        run: sha256sum --ignore-missing --check "$MINT_ISO_SHA_FILENAME"
-
-      - name: Mount the ISO as Loop file system
-        run: |
-          sudo mkdir rootfs
-          sudo mount -o loop "$MINT_ISO_CINNAMON_FILENAME" rootfs
-
-      - name: Unsquashfs the ISO file system
-        run: |
-          fs=$(find . -type f | grep filesystem.squashfs)
-          sudo unsquashfs -f -d unsquashfs/ $fs
-
-      - name: Tar the ISO file system into a tagged docker image on the local docker cache
-        shell: bash
         env:
           local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local"
         run: |
@@ -169,7 +138,6 @@ jobs:
       # It uses the `tags` and `labels` parameters to tag and label the image with the output from the "meta" step.
       - name: Push all Tags
         id: promote
-        shell: bash
         env:
           local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
         run: |
@@ -185,7 +153,6 @@ jobs:
 
       - name: Get Digest for the new image
         id: digest
-        shell: bash
         run: |
           TAGS=(${{ steps.meta.outputs.tags }})
           digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${TAGS[3]}")
