@@ -20,7 +20,7 @@ on:
     tags: [ '*.*.*' ]
   pull_request:
     branches: [ "main" ]
-  
+
 # Defines two custom environment variables for the workflow. These are used for the Container registry domain, and a name for the Docker image that this workflow builds.
 env:
   REGISTRY: ghcr.io
@@ -38,7 +38,7 @@ jobs:
       packages: write
       attestations: write
       id-token: write
-      # 
+      #
     steps:
       - name: Dependencies
         uses: daaku/gh-action-apt-install@49782cd9703eaa5c436b9e6caa6529e7c5e50ecd #v4
@@ -47,6 +47,14 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+
+        # Install the cosign tool except on PR
+        # https://github.com/sigstore/cosign-installer
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 #v3.5.0
+        with:
+          cosign-release: 'v2.2.4'
 
       - name: Download the Mint ISO File
         run:  curl -sfL "$MINT_ISO_URL_BASE$MINT_ISO_CINNAMON_FILENAME" -o "$MINT_ISO_CINNAMON_FILENAME"
@@ -67,36 +75,16 @@ jobs:
           fs=$(find . -type f | grep filesystem.squashfs)
           sudo unsquashfs -f -d unsquashfs/ $fs
 
-      - name: Debug | Show a list of docker images that are present on the host
-        run: docker images --all
-
       - name: Tar the ISO file system into a tagged docker image on the local docker cache
         shell: bash
         env:
-          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local"
         run: |
           echo "Importing data from $(pwd)/unsquashfs into a new docker iamge called $local_image"
           sudo tar -C unsquashfs -c . | docker import - "$local_image"
 
-      - name: Debug | Once again show a list of docker images that are present on the host
+      - name: Debug | Show a list of docker images that are present on the host
         run: docker images --all
-
-      - name: Get Digest for the new image
-        id: digest
-        shell: bash
-        env:
-          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-        run: |
-          echo "DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$local_image")" >> $GITHUB_OUTPUT
-        continue-on-error: false
-
-        # Install the cosign tool except on PR
-        # https://github.com/sigstore/cosign-installer
-      - name: Install cosign
-        if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 #v3.5.0
-        with:
-          cosign-release: 'v2.2.4'
 
         # Uses the `docker/login-action` action to log in to the Container registry registry using the account and password that will publish the packages. Once published, the packages are scoped to the account defined here.
       - name: Log in to the Container registry
@@ -134,15 +122,28 @@ jobs:
         id: promote
         shell: bash
         env:
-          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-        run: |          
-          TAGS=(${{ steps.meta.outputs.tags }})        
+          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
+        run: |
+          TAGS=(${{ steps.meta.outputs.tags }})
           for value in "${TAGS[@]}"
           do
             docker tag "$local_image" ${value}
             docker push ${value}
           done
 
+      - name: Debug | Once again show a list of docker images that are present on the host
+        run: docker images --all
+
+      - name: Get Digest for the new image
+        id: digest
+        shell: bash
+        env:
+          images: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+        run: |
+          tag=(${{ steps.meta.outputs.tags[0] }})
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$images:$tag")
+          echo "The digest for $images:$tag is $digest"
+          echo "DIGEST=$digest" >> $GITHUB_OUTPUT
 
       # Sign the resulting Docker image digest except on PRs.
       # This will only write to the public Rekor transparency log when the Docker
@@ -159,7 +160,7 @@ jobs:
         # against the sigstore community Fulcio instance.
         run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
 
-      # This step generates an artifact attestation for the image, which is an unforgeable statement about where and how it was built. It increases supply chain security for people who consume the image. For more information, see "[AUTOTITLE](/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds)." 
+      # This step generates an artifact attestation for the image, which is an unforgeable statement about where and how it was built. It increases supply chain security for people who consume the image. For more information, see "[AUTOTITLE](/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds)."
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
         with:
