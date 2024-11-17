@@ -58,7 +58,9 @@ jobs:
         run: sha256sum --ignore-missing --check "$MINT_ISO_SHA_FILENAME"
 
       - name: Mount the ISO as Loop file system
-        run: sudo mount -o loop "$MINT_ISO_CINNAMON_FILENAME" rootfs
+        run: |
+          sudo mkdir rootfs
+          sudo mount -o loop "$MINT_ISO_CINNAMON_FILENAME" rootfs
 
       - name: Unsquashfs the ISO file system
         run: |
