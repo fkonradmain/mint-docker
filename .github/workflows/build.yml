@@ -1,0 +1,155 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: 'Log level'
+        required: true
+        default: 'warning'
+        type: choice
+        options:
+        - info
+        - warning
+        - debug
+  schedule:
+    - cron: "1 0 1 * *"
+  push:
+    branches: [ "main" ]
+    # Publish semver tags as releases.
+    tags: [ '*.*.*' ]
+  pull_request:
+    branches: [ "main" ]
+  
+# Defines two custom environment variables for the workflow. These are used for the Container registry domain, and a name for the Docker image that this workflow builds.
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  MINT_ISO_URL_BASE: "https://mirrors.kernel.org/linuxmint/stable/22/"
+  MINT_ISO_CINNAMON_FILENAME:  "linuxmint-22-cinnamon-64bit.iso"
+  MINT_ISO_SHA_FILENAME: "sha256sum.txt"
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    # Sets the permissions granted to the `GITHUB_TOKEN` for the actions in this job.
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+      # 
+    steps:
+      - name: Dependencies
+        uses: daaku/gh-action-apt-install@49782cd9703eaa5c436b9e6caa6529e7c5e50ecd #v4
+        with:
+          packages: squashfs-tools
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download the Mint ISO File
+        run:  curl -sfL "$MINT_ISO_URL_BASE$MINT_ISO_CINNAMON_FILENAME" -o "$MINT_ISO_CINNAMON_FILENAME"
+
+      - name: Download the Mint SHA256sum.txt file
+        run: curl -sfL "$MINT_ISO_URL_BASE$MINT_ISO_SHA_FILENAME" -o "$MINT_ISO_SHA_FILENAME"
+
+      - name: Verify the Mint ISO File hashsum
+        run: sha256sum --ignore-missing --check "$MINT_ISO_SHA_FILENAME"
+
+      - name: Mount the ISO as Loop file system
+        run: sudo mount -o loop "$MINT_ISO_CINNAMON_FILENAME" rootfs
+
+      - name: Unsquashfs the ISO file system
+        run: |
+          fs=$(find . -type f | grep filesystem.squashfs)
+          sudo unsquashfs -f -d unsquashfs/ $fs
+
+      - name: Tar the ISO file system into a tagged docker image on the local docker cache
+        env:
+          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
+        run: sudo tar -C unsquashfs -c . | docker import - "$local_image"
+
+      - name: Get Digest for the new image
+        id: digest
+        env:
+          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
+        run:
+          echo "DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$local_image")" >> $GITHUB_OUTPUT
+
+        # Install the cosign tool except on PR
+        # https://github.com/sigstore/cosign-installer
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 #v3.5.0
+        with:
+          cosign-release: 'v2.2.4'
+
+        # Uses the `docker/login-action` action to log in to the Container registry registry using the account and password that will publish the packages. Once published, the packages are scoped to the account defined here.
+      - name: Log in to the Container registry
+        uses: docker/login-action@0d4c9c5ea7693da7b068278f7b52bda2a190a446 # v3.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # This step uses [docker/metadata-action](https://github.com/docker/metadata-action#about) to extract tags and labels that will be applied to the specified image. The `id` "meta" allows the output of this step to be referenced in a subsequent step. The `images` value provides the base name for the tags and labels.
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5.5.1
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=schedule
+            type=schedule,pattern={{date 'YYYYMMDD-HHmmss' tz='UTC'}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=pep440,pattern={{version}}
+            type=pep440,pattern={{major}}.{{minor}}
+            type=pep440,pattern={{major}}
+            type=sha
+            type=sha,format=long
+            type=sha,format=long,prefix={{branch}}{{base_ref}}{{tag}}-,suffix=-{{date 'YYYYMMDD-HHmmss' tz='UTC'}}
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+
+      # TODO: as soon as we can introduce the source ref for merge requests here, we should add it. As of now, Merge Requests pointing to master always have their prefix set to main. Yet we want it to be set after the MR source branch name. E.g. feat/xyz
+
+      # This step uses the `docker/build-push-action` action to build the image, based on your repository's `Dockerfile`. If the build succeeds, it pushes the image to GitHub Packages.
+      # It uses the `context` parameter to define the build's context as the set of files located in the specified path. For more information, see "[Usage](https://github.com/docker/build-push-action#usage)" in the README of the `docker/build-push-action` repository.
+      # It uses the `tags` and `labels` parameters to tag and label the image with the output from the "meta" step.
+      - name: Push all Tags
+        id: promote
+        shell: bash
+        env:
+          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
+        run: |          
+          TAGS=(${{ steps.meta.outputs.tags }})        
+          for value in "${TAGS[@]}"
+          do
+            docker tag "$local_image" ${value}
+            docker push ${value}
+          done
+
+
+      # Sign the resulting Docker image digest except on PRs.
+      # This will only write to the public Rekor transparency log when the Docker
+      # repository is public to avoid leaking data.  If you would like to publish
+      # transparency data even for private images, pass --force to cosign below.
+      # https://github.com/sigstore/cosign
+      - name: Sign the published Docker image
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.digest.outputs.DIGEST }}
+        # This step uses the identity token to provision an ephemeral certificate
+        # against the sigstore community Fulcio instance.
+        run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
+
+      # This step generates an artifact attestation for the image, which is an unforgeable statement about where and how it was built. It increases supply chain security for people who consume the image. For more information, see "[AUTOTITLE](/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds)." 
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-digest: ${{ steps.digest.outputs.DIGEST }}
+          push-to-registry: true
