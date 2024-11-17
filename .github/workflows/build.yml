@@ -20,7 +20,7 @@ on:
     tags: [ '*.*.*' ]
   pull_request:
     branches: [ "main" ]
-  
+
 # Defines two custom environment variables for the workflow. These are used for the Container registry domain, and a name for the Docker image that this workflow builds.
 env:
   REGISTRY: ghcr.io
@@ -38,7 +38,7 @@ jobs:
       packages: write
       attestations: write
       id-token: write
-      # 
+      #
     steps:
       - name: Dependencies
         uses: daaku/gh-action-apt-install@49782cd9703eaa5c436b9e6caa6529e7c5e50ecd #v4
@@ -47,35 +47,6 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Download the Mint ISO File
-        run:  curl -sfL "$MINT_ISO_URL_BASE$MINT_ISO_CINNAMON_FILENAME" -o "$MINT_ISO_CINNAMON_FILENAME"
-
-      - name: Download the Mint SHA256sum.txt file
-        run: curl -sfL "$MINT_ISO_URL_BASE$MINT_ISO_SHA_FILENAME" -o "$MINT_ISO_SHA_FILENAME"
-
-      - name: Verify the Mint ISO File hashsum
-        run: sha256sum --ignore-missing --check "$MINT_ISO_SHA_FILENAME"
-
-      - name: Mount the ISO as Loop file system
-        run: sudo mount -o loop "$MINT_ISO_CINNAMON_FILENAME" rootfs
-
-      - name: Unsquashfs the ISO file system
-        run: |
-          fs=$(find . -type f | grep filesystem.squashfs)
-          sudo unsquashfs -f -d unsquashfs/ $fs
-
-      - name: Tar the ISO file system into a tagged docker image on the local docker cache
-        env:
-          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
-        run: sudo tar -C unsquashfs -c . | docker import - "$local_image"
-
-      - name: Get Digest for the new image
-        id: digest
-        env:
-          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
-        run:
-          echo "DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$local_image")" >> $GITHUB_OUTPUT
 
         # Install the cosign tool except on PR
         # https://github.com/sigstore/cosign-installer
@@ -112,6 +83,32 @@ jobs:
             type=sha,format=long,prefix={{branch}}{{base_ref}}{{tag}}-,suffix=-{{date 'YYYYMMDD-HHmmss' tz='UTC'}}
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
 
+      - name: Download the Mint ISO File
+        run:  curl -sfL "$MINT_ISO_URL_BASE$MINT_ISO_CINNAMON_FILENAME" -o "$MINT_ISO_CINNAMON_FILENAME"
+
+      - name: Download the Mint SHA256sum.txt file
+        run: curl -sfL "$MINT_ISO_URL_BASE$MINT_ISO_SHA_FILENAME" -o "$MINT_ISO_SHA_FILENAME"
+
+      - name: Verify the Mint ISO File hashsum
+        run: sha256sum --ignore-missing --check "$MINT_ISO_SHA_FILENAME"
+
+      - name: Mount the ISO as Loop file system
+        run: |
+          sudo mkdir -p rootfs
+          sudo mount -o loop "$MINT_ISO_CINNAMON_FILENAME" rootfs
+
+      - name: Unsquashfs the ISO file system
+        run: |
+          fs=$(find . -type f | grep filesystem.squashfs)
+          sudo unsquashfs -f -d unsquashfs/ $fs
+
+      - name: Tar the ISO file system into a tagged docker image on the local docker cache
+        env:
+          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local"
+        run: |
+          echo "Importing data from $(pwd)/unsquashfs into a new docker image called $local_image"
+          sudo tar -C unsquashfs -c . | docker import - "$local_image"
+
       # TODO: as soon as we can introduce the source ref for merge requests here, we should add it. As of now, Merge Requests pointing to master always have their prefix set to main. Yet we want it to be set after the MR source branch name. E.g. feat/xyz
 
       # This step uses the `docker/build-push-action` action to build the image, based on your repository's `Dockerfile`. If the build succeeds, it pushes the image to GitHub Packages.
@@ -119,17 +116,24 @@ jobs:
       # It uses the `tags` and `labels` parameters to tag and label the image with the output from the "meta" step.
       - name: Push all Tags
         id: promote
-        shell: bash
         env:
           local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
-        run: |          
-          TAGS=(${{ steps.meta.outputs.tags }})        
+        run: |
+          TAGS=(${{ steps.meta.outputs.tags }})
           for value in "${TAGS[@]}"
           do
             docker tag "$local_image" ${value}
             docker push ${value}
           done
 
+      - name: Get Digest for the new image
+        id: digest
+        run: |
+          TAGS=(${{ steps.meta.outputs.tags }})
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${TAGS[3]}")
+          digest=${digest#*@}
+          echo "The digest for ${TAGS[3]} is $digest"
+          echo "DIGEST=$digest" >> $GITHUB_OUTPUT
 
       # Sign the resulting Docker image digest except on PRs.
       # This will only write to the public Rekor transparency log when the Docker
@@ -146,7 +150,7 @@ jobs:
         # against the sigstore community Fulcio instance.
         run: echo "${TAGS}" | xargs -I {} cosign sign --yes {}@${DIGEST}
 
-      # This step generates an artifact attestation for the image, which is an unforgeable statement about where and how it was built. It increases supply chain security for people who consume the image. For more information, see "[AUTOTITLE](/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds)." 
+      # This step generates an artifact attestation for the image, which is an unforgeable statement about where and how it was built. It increases supply chain security for people who consume the image. For more information, see "[AUTOTITLE](/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds)."
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
         with:
