@@ -113,7 +113,7 @@ jobs:
 
       - name: Mount the ISO as Loop file system
         run: |
-          sudo mkdir rootfs
+          sudo mkdir -f rootfs
           sudo mount -o loop "$MINT_ISO_CINNAMON_FILENAME" rootfs
 
       - name: Unsquashfs the ISO file system
