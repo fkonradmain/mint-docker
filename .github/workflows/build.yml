@@ -67,17 +67,25 @@ jobs:
           fs=$(find . -type f | grep filesystem.squashfs)
           sudo unsquashfs -f -d unsquashfs/ $fs
 
+      - name: Debug | Show a list of docker images that are present on the host
+        run: docker images --all
+
       - name: Tar the ISO file system into a tagged docker image on the local docker cache
+        shell: bash
         env:
-          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
-        run: sudo tar -C unsquashfs -c . | docker import - "$local_image"
+          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local"
+        run: |
+          echo "Importing data from $(pwd)/unsquashfs into a new docker iamge called $local_image"
+          sudo tar -C unsquashfs -c . | docker import - "$local_image"
 
       - name: Get Digest for the new image
         id: digest
+        shell: bash
         env:
-          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
-        run:
+          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local"
+        run: |
           echo "DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$local_image")" >> $GITHUB_OUTPUT
+        continue-on-error: false
 
         # Install the cosign tool except on PR
         # https://github.com/sigstore/cosign-installer
