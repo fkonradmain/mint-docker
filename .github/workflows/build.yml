@@ -156,7 +156,8 @@ jobs:
         run: |
           TAGS=(${{ steps.meta.outputs.tags }})
           digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${TAGS[3]}")
-          echo "The digest for $images:$tag is $digest"
+          digest=${digest#*@}
+          echo "The digest for ${TAGS[3]} is $digest"
           echo "DIGEST=$digest" >> $GITHUB_OUTPUT
 
       # Sign the resulting Docker image digest except on PRs.
