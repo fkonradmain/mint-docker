@@ -73,16 +73,19 @@ jobs:
       - name: Tar the ISO file system into a tagged docker image on the local docker cache
         shell: bash
         env:
-          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local"
+          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
         run: |
           echo "Importing data from $(pwd)/unsquashfs into a new docker iamge called $local_image"
           sudo tar -C unsquashfs -c . | docker import - "$local_image"
+
+      - name: Debug | Once again show a list of docker images that are present on the host
+        run: docker images --all
 
       - name: Get Digest for the new image
         id: digest
         shell: bash
         env:
-          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local"
+          local_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
         run: |
           echo "DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$local_image")" >> $GITHUB_OUTPUT
         continue-on-error: false
@@ -131,7 +134,7 @@ jobs:
         id: promote
         shell: bash
         env:
-          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:local
+          local_image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         run: |          
           TAGS=(${{ steps.meta.outputs.tags }})        
           for value in "${TAGS[@]}"
