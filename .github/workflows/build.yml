@@ -137,11 +137,9 @@ jobs:
       - name: Get Digest for the new image
         id: digest
         shell: bash
-        env:
-          images: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
         run: |
-          tag=(${{ steps.meta.outputs.tags[0] }})
-          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$images:$tag")
+          tag=(${{ steps.meta.outputs.tags[3] }})
+          digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$tag")
           echo "The digest for $images:$tag is $digest"
           echo "DIGEST=$digest" >> $GITHUB_OUTPUT
 
